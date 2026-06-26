@@ -39,6 +39,9 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+          # Fetch tags so that the go module version in the binary corresponds
+          # to the most recent git tag as an ancestor of the target build.
+          fetch-tags: true
 
       - name: Cleanup Disk space in runner
         uses: ./.github/actions/disk-cleanup
@@ -56,6 +59,9 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
+          # Fetch full history so that go build can find the nearest ancestor
+          # with a VCS tag in order to calculate an accurate module version.
+          fetch-depth: 0
 
       - name: Generate image tag for docs-builder
         id: docs-builder-tag
