@@ -56,12 +56,18 @@ func (ops *envoyOps) Delete(ctx context.Context, _ statedb.ReadTxn, _ statedb.Re
 	releasedListeners := sets.New[string]()
 
 	var err error
-	if prev := res.ReconciledResources; prev != nil {
+	resourcesToDelete := res.ReconciledResources
+	if resourcesToDelete == nil {
+		resourcesToDelete = res.Resources.DeepCopy()
+		resourcesToDelete.PortAllocationCallbacks = nil
+	}
+	if resourcesToDelete != nil {
 		// Perform the deletion with the resources that were last successfully reconciled
-		// instead of whatever the latest one is (which would have not been pushed to Envoy).
-		err = ops.xds.DeleteEnvoyResources(ctx, *prev, nil)
+		// instead of whatever the latest one is. If no reconciled resources were recorded yet,
+		// fall back to the desired resources as they may already have been pushed to Envoy.
+		err = ops.xds.DeleteEnvoyResources(ctx, *resourcesToDelete, nil)
 
-		for _, listener := range prev.Listeners {
+		for _, listener := range resourcesToDelete.Listeners {
 			ops.portAllocator.ReleaseProxyPort(listener.Name)
 			releasedListeners.Insert(listener.Name)
 		}

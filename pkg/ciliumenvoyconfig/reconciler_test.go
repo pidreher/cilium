@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	envoy_config_cluster "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	envoy_config_core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_listener "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	"github.com/stretchr/testify/require"
@@ -21,9 +22,11 @@ import (
 type waitGroupResourceMutator struct {
 	completionCh chan *completion.Completion
 	gotWaitGroup atomic.Bool
+	deleted      []xds.Resources
 }
 
-func (m *waitGroupResourceMutator) DeleteEnvoyResources(context.Context, xds.Resources, *completion.WaitGroup) error {
+func (m *waitGroupResourceMutator) DeleteEnvoyResources(_ context.Context, resources xds.Resources, _ *completion.WaitGroup) error {
+	m.deleted = append(m.deleted, resources)
 	return nil
 }
 
@@ -111,4 +114,22 @@ func TestUpdateEnvoyResourcesDoesNotWaitWithoutPortAllocationCallbacks(t *testin
 
 	require.NoError(t, ops.updateEnvoyResources(context.Background(), xds.NewResources(), resources))
 	require.False(t, mutator.gotWaitGroup.Load())
+}
+
+func TestDeleteEnvoyResourcesFallsBackToDesiredResourcesWhenReconciledResourcesMissing(t *testing.T) {
+	mutator := &waitGroupResourceMutator{}
+	ops := &envoyOps{xds: mutator}
+
+	resources := xds.NewResources()
+	resources.Clusters["stale-cluster"] = &envoy_config_cluster.Cluster{Name: "stale-cluster"}
+	resources.PortAllocationCallbacks["unreconciled-listener"] = func(context.Context) error {
+		return nil
+	}
+
+	res := &EnvoyResource{Resources: resources}
+
+	require.NoError(t, ops.Delete(context.Background(), nil, 0, res))
+	require.Len(t, mutator.deleted, 1)
+	require.Contains(t, mutator.deleted[0].Clusters, "stale-cluster")
+	require.Nil(t, mutator.deleted[0].PortAllocationCallbacks)
 }
